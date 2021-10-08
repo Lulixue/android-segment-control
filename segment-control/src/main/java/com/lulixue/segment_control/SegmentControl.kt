@@ -1,33 +1,58 @@
 package com.lulixue.segment_control
 
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
+import androidx.core.view.GestureDetectorCompat
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+@SuppressLint("ClickableViewAccessibility")
 class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     companion object {
         private const val DEFAULT_SELECTED_BG_COLOR = Color.WHITE
+        private const val DEFAULT_ITEM_TEXT_COLOR = Color.BLACK
+        private const val DEFAULT_ITEM_CLICKED_TEXT_COLOR = Color.GRAY
         private val DEFAULT_SEPARATOR_COLOR = Color.parseColor("#CBCBCF")
         private val DEFAULT_BACKGROUND_COLOR = Color.parseColor("#EEEEEF")
     }
+    private val segmentGestureDetector = GestureDetectorCompat(context, SegmentGestureListener())
     private var roundRadius: Float = 5.dp
     private var itemPaddingStart = 10.dp
     private var itemPaddingEnd = 10.dp
-    private var itemPaddingTop = 5.dp
-    private var itemPaddingBottom = 5.dp
+    private var itemPaddingTop = 10.dp
+    private var itemPaddingBottom = 10.dp
     private var itemTextSize = 13.sp
     private var fixedWidth = false
     private var separatorColor = DEFAULT_SEPARATOR_COLOR
     private var itemBackgroundColor = DEFAULT_BACKGROUND_COLOR
     private var selectedBackgroundColor = DEFAULT_SELECTED_BG_COLOR
-    private var selectedRoundPadding: Float = 2.dp
+    private var itemTextColor = DEFAULT_ITEM_TEXT_COLOR
+    private var itemFixedPadding: Float = 2.dp
     private val separatorWidth = 1.dp
     private var separatorHeight = 0f
-    private var selectedPosition = 0
+    private var slideSelected = false
+    private var touchOnPosition = -1
+    private var downX = 0f
+    private var selectedWidth: Float = 0f
+    private var selectedItemX: Float = 0f
+    private var previousText: String? = null
+    var selectedPosition = -1
+        set(value) {
+            if (field != value) {
+                if (field != -1) {
+                    previousText = items[field]
+                }
+                field = value
+                animateToPosition(value)
+            }
+        }
 
     private val items = ArrayList<String>().apply {
         add("First")
@@ -35,11 +60,15 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         add("Third")
     }
 
-    private var itemWidths = ArrayList<Float>()
+    private val itemWidths = ArrayList<Float>()
+    private val itemEndX = ArrayList<Float>()
     private var bound = Rect()
 
     private var fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        strokeWidth = 1.dp
+    }
+    private var selectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        setShadowLayer(3.0f, 0.0f, 2.0f, Color.LTGRAY)
+        color = selectedBackgroundColor
     }
 
     private var linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -51,6 +80,97 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         textSize = itemTextSize
         textAlign = Paint.Align.CENTER
     }
+
+    init {
+        setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    touchEnd(event.x)
+                }
+            }
+            segmentGestureDetector.onTouchEvent(event)
+        }
+        selectedPosition = 0
+    }
+    private fun animateToPosition(position: Int) {
+        if (itemEndX.isEmpty()) {
+            return
+        }
+        val destItemX = (if (position == 0) 0f else itemEndX[position-1]) + itemFixedPadding
+        val destWidth = itemWidths[position]
+        val startWidth = selectedWidth
+        val animator = ValueAnimator.ofFloat(selectedItemX, destItemX)
+        animator.addUpdateListener {
+            selectedItemX = it.animatedValue as Float
+            selectedWidth = startWidth + it.animatedFraction * (destWidth - startWidth)
+            if (it.animatedFraction > 0.5f) {
+                previousText = items[position]
+            }
+            invalidate()
+        }
+        animator.duration = 200
+        animator.start()
+    }
+
+    private fun getTouchPosition(x: Float): Int {
+        if (x < 0) {
+            return -1
+        }
+        for ((i, maxX) in itemEndX.withIndex()) {
+            if (x < maxX) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    private fun touchEnd(x: Float) {
+        slideSelected = false
+        touchOnPosition = -1
+        val position = getTouchPosition(x)
+        if (position != -1) {
+            selectedPosition = position
+        }
+        invalidate()
+    }
+
+    inner class SegmentGestureListener : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean {
+            val position = getTouchPosition(e.x)
+            if (position == selectedPosition) {
+                slideSelected = true
+            }
+            downX = e.x
+            touchOnPosition = position
+            invalidate()
+            return true
+        }
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            touchEnd(e.x)
+            return false
+        }
+        override fun onScroll(
+            e1: MotionEvent?,
+            e2: MotionEvent?,
+            distanceX: Float,
+            distanceY: Float,
+        ): Boolean {
+            if (slideSelected) {
+                val destItemX = selectedItemX - (downX - e2!!.x)
+                selectedItemX = if (destItemX > itemFixedPadding) {
+                    max(destItemX, itemEndX.last())
+                } else {
+                    itemFixedPadding
+                }
+            }
+            touchOnPosition = getTouchPosition(e2!!.x)
+            invalidate()
+            return false
+        }
+    }
+
+
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
@@ -81,9 +201,9 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
             }
         }
 
-        totalWidth += (3 * (itemPaddingStart + itemPaddingEnd + 2 * selectedRoundPadding)).toInt()
+        totalWidth += (3 * (itemPaddingStart + itemPaddingEnd + 2 * itemFixedPadding) + (itemWidths.size-1) * separatorWidth).toInt()
 
-        val wrapContentHeight = (maxHeight + itemPaddingTop + itemPaddingBottom + 2 * selectedRoundPadding).toInt()
+        val wrapContentHeight = (maxHeight + itemPaddingTop + itemPaddingBottom + 2 * itemFixedPadding).toInt()
         val destHeight = when(heightMode) {
             MeasureSpec.AT_MOST -> {
                 min(wrapContentHeight, heightSize)
@@ -106,7 +226,7 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
                 totalWidth
             }
         }
-        val itemWidth = destWidth - 6 * selectedRoundPadding
+        val itemWidth = destWidth - 6 * itemFixedPadding
         if (fixedWidth) {
             itemWidths.clear()
             repeat(items.size) {
@@ -123,6 +243,13 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
                 itemWidths.add(newWidth)
             }
         }
+        itemEndX.clear()
+        var startX = 0f
+        for (width in itemWidths) {
+            itemEndX.add(startX + width + 2*itemFixedPadding)
+            startX += itemEndX.last()
+        }
+
         setMeasuredDimension(destWidth, destHeight)
     }
 
@@ -136,39 +263,54 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
 
         var startX = 0f
         for ((i, text) in items.withIndex()) {
-
-            startX += selectedRoundPadding
-            if (selectedPosition == i) {
-                fillPaint.color = selectedBackgroundColor
-                canvas.drawRoundRect(startX, selectedRoundPadding,
-                            startX + itemWidths[i], measuredHeight - selectedRoundPadding,
-                                roundRadius,  roundRadius, fillPaint)
-                textPaint.typeface = Typeface.DEFAULT_BOLD
-            } else {
-                textPaint.typeface = Typeface.DEFAULT
-            }
-
+            startX += itemFixedPadding
             val x = startX + itemWidths[i] / 2
             val y = measuredHeight / 2f - (textPaint.descent() + textPaint.ascent()) / 2
+
+            if (i != 0) {
+                linePaint.color = if (abs(i - selectedPosition) > 1) separatorColor else Color.TRANSPARENT
+                val startY = (measuredHeight - separatorHeight) / 2
+                canvas.drawRect(
+                    startX,
+                    startY,
+                    startX + separatorWidth,
+                    startY + separatorHeight,
+                    linePaint
+                )
+            }
+
+            textPaint.typeface = Typeface.DEFAULT
+            textPaint.color =
+                if (touchOnPosition == i) DEFAULT_ITEM_CLICKED_TEXT_COLOR else itemTextColor
             canvas.drawText(text, x, y, textPaint)
 
             startX += itemWidths[i]
-            startX += selectedRoundPadding
+            startX += itemFixedPadding
             linePaint.color = separatorColor
-            if (i != items.lastIndex) {
-                if (abs(i - selectedPosition) > 0) {
-                    val startY = (measuredHeight - separatorHeight) / 2
-                    canvas.drawRect(
-                        startX,
-                        startY,
-                        startX + separatorWidth,
-                        startY + separatorHeight,
-                        linePaint
-                    )
-                }
-            }
         }
 
+        if (selectedPosition >= 0) {
+            val i = selectedPosition
+
+            selectedWidth = if (selectedWidth == 0f) itemWidths[i] else selectedWidth
+            selectedItemX = if (selectedItemX == 0f) itemFixedPadding else selectedItemX
+            val animateEnd = selectedWidth == itemWidths[i]
+            val text = if (previousText == null || animateEnd) items[i] else previousText!!
+            val width = selectedWidth
+            val selectedStartX = selectedItemX
+
+            canvas.drawRoundRect(
+                selectedStartX , itemFixedPadding,
+                selectedStartX + width, measuredHeight - itemFixedPadding,
+                roundRadius, roundRadius, selectedPaint
+            )
+            textPaint.typeface = if (animateEnd) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+
+            val x = selectedStartX + width / 2
+            val y = measuredHeight / 2f - (textPaint.descent() + textPaint.ascent()) / 2
+            textPaint.color = itemTextColor
+            canvas.drawText(text, x, y, textPaint)
+        }
         canvas.restore()
     }
 }
