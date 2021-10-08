@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.view.GestureDetectorCompat
 import kotlin.math.abs
 import kotlin.math.max
@@ -62,23 +63,29 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
 
     private val itemWidths = ArrayList<Float>()
     private val itemEndX = ArrayList<Float>()
-    private var bound = Rect()
+    private val bound = Rect()
 
-    private var fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     }
-    private var selectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val selectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         setShadowLayer(3.0f, 0.0f, 2.0f, Color.LTGRAY)
         color = selectedBackgroundColor
     }
 
-    private var linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         strokeWidth = 1.dp
         strokeCap = Paint.Cap.ROUND
     }
 
-    private var textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val selectedTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = itemTextColor
         textSize = itemTextSize
         textAlign = Paint.Align.CENTER
+    }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = itemTextSize
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT
     }
 
     init {
@@ -92,6 +99,16 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         }
         selectedPosition = 0
     }
+    private fun animateSelectedText() {
+        val animator = ValueAnimator.ofInt(selectedTextPaint.alpha, 255)
+        animator.addUpdateListener {
+            selectedTextPaint.alpha = it.animatedValue as Int
+            invalidate()
+        }
+        animator.interpolator = AccelerateDecelerateInterpolator()
+        animator.duration = 200
+        animator.start()
+    }
     private fun animateToPosition(position: Int) {
         if (itemEndX.isEmpty()) {
             return
@@ -100,15 +117,21 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         val destWidth = itemWidths[position]
         val startWidth = selectedWidth
         val animator = ValueAnimator.ofFloat(selectedItemX, destItemX)
+        selectedTextPaint.alpha = 255
         animator.addUpdateListener {
             selectedItemX = it.animatedValue as Float
             selectedWidth = startWidth + it.animatedFraction * (destWidth - startWidth)
-            if (it.animatedFraction > 0.5f) {
+            if (it.animatedFraction > 0.7f) {
                 previousText = items[position]
             }
             invalidate()
+
+            if (it.animatedFraction == 1.0f) {
+//                animateSelectedText()
+            }
         }
-        animator.duration = 200
+        animator.interpolator = AccelerateDecelerateInterpolator()
+        animator.duration = 150
         animator.start()
     }
 
@@ -279,7 +302,6 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
                 )
             }
 
-            textPaint.typeface = Typeface.DEFAULT
             textPaint.color =
                 if (touchOnPosition == i) DEFAULT_ITEM_CLICKED_TEXT_COLOR else itemTextColor
             canvas.drawText(text, x, y, textPaint)
@@ -304,12 +326,11 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
                 selectedStartX + width, measuredHeight - itemFixedPadding,
                 roundRadius, roundRadius, selectedPaint
             )
-            textPaint.typeface = if (animateEnd) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
             val x = selectedStartX + width / 2
             val y = measuredHeight / 2f - (textPaint.descent() + textPaint.ascent()) / 2
-            textPaint.color = itemTextColor
-            canvas.drawText(text, x, y, textPaint)
+            selectedTextPaint.typeface = if (animateEnd) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            canvas.drawText(text, x, y, selectedTextPaint)
         }
         canvas.restore()
     }
