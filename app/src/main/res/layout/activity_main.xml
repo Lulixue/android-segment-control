@@ -7,11 +7,21 @@
     tools:context=".MainActivity">
 
     <com.lulixue.segment_control.SegmentControl
+        android:id="@+id/segment1"
         android:layout_width="wrap_content"
         android:layout_height="40dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/segment2"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintRight_toRightOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <com.lulixue.segment_control.SegmentControl
+        android:id="@+id/segment2"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintTop_toBottomOf="@id/segment1"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent"
+        />
 </androidx.constraintlayout.widget.ConstraintLayout>
