@@ -4,16 +4,21 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
+import android.service.autofill.TextValueSanitizer
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.TextView
+import androidx.core.view.GestureDetectorCompat
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 @SuppressLint("ClickableViewAccessibility")
-class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+class SegmentControl2(context: Context, attrs: AttributeSet?) : ViewGroup(context, attrs) {
     companion object {
         private const val DEFAULT_SELECTED_BG_COLOR = Color.WHITE
         private const val DEFAULT_ITEM_TEXT_COLOR = Color.BLACK
@@ -21,6 +26,7 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         private val DEFAULT_SEPARATOR_COLOR = Color.parseColor("#CBCBCF")
         private val DEFAULT_BACKGROUND_COLOR = Color.parseColor("#EEEEEF")
     }
+    private val segmentGestureDetector = GestureDetectorCompat(context, SegmentGestureListener())
     private var roundRadius: Float = 5.dp
     private var itemPaddingStart = 10.dp
     private var itemPaddingEnd = 10.dp
@@ -40,17 +46,16 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
     private var downX = 0f
     private var selectedWidth: Float = 0f
     private var selectedItemX: Float = 0f
-    private var downSelectedX: Float = 0f
     private var previousText: String? = null
     var selectedPosition = -1
         set(value) {
-//            if (field != value) {
+            if (field != value) {
                 if (field != -1) {
                     previousText = items[field]
                 }
                 field = value
                 animateToPosition(value)
-//            }
+            }
         }
 
     private val items = ArrayList<String>().apply {
@@ -58,6 +63,9 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         add("Second")
         add("Third")
     }
+
+    private var backgroundView: View = View(context)
+    private val textViews = ArrayList<TextView>()
 
     private val itemWidths = ArrayList<Float>()
     private val itemEndX = ArrayList<Float>()
@@ -89,17 +97,11 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
     init {
         setOnTouchListener { _, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    touchStart(event.x)
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    touchMove(event.x)
-                }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     touchEnd(event.x)
                 }
             }
-            true
+            segmentGestureDetector.onTouchEvent(event)
         }
         selectedPosition = 0
     }
@@ -113,19 +115,11 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         animator.duration = 200
         animator.start()
     }
-
-    private fun getPositionItemX(position: Int): Float {
-        if (position > itemEndX.lastIndex) {
-            return 0f
-        }
-        return (if (position == 0) 0f else itemEndX[position-1]) + itemFixedPadding
-    }
-
     private fun animateToPosition(position: Int) {
         if (itemEndX.isEmpty()) {
             return
         }
-        val destItemX = getPositionItemX(position)
+        val destItemX = (if (position == 0) 0f else itemEndX[position-1]) + itemFixedPadding
         val destWidth = itemWidths[position]
         val startWidth = selectedWidth
         val animator = ValueAnimator.ofFloat(selectedItemX, destItemX)
@@ -152,52 +146,60 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
             return -1
         }
         for ((i, maxX) in itemEndX.withIndex()) {
-            if (x <= maxX) {
+            if (x < maxX) {
                 return i
             }
         }
         return -1
     }
 
-    private val minSelectedX: Float
-        get() = getPositionItemX(0)
-
-    private val maxSelectedX: Float
-        get() = getPositionItemX(itemEndX.lastIndex)
-
-    private fun touchMove(x: Float) {
-        if (slideSelected) {
-            val deltaX = downX - x
-            val destItemX = downSelectedX - deltaX
-            selectedItemX = min(max(destItemX, minSelectedX), maxSelectedX)
-            println("deltaX $deltaX， newSelected: $destItemX")
-        }
-        touchOnPosition = getTouchPosition(x)
-        invalidate()
-    }
-
-    private fun touchStart(x: Float) {
-        val position = getTouchPosition(x)
-        if (position == selectedPosition) {
-            slideSelected = true
-        }
-        downX = x
-        downSelectedX = selectedItemX
-        touchOnPosition = position
-        invalidate()
-    }
-
     private fun touchEnd(x: Float) {
-        val position = if (slideSelected) getTouchPosition(selectedItemX) else getTouchPosition(x)
-
-        touchOnPosition = -1
         slideSelected = false
+        touchOnPosition = -1
+        val position = getTouchPosition(x)
         if (position != -1) {
             selectedPosition = position
-        } else {
+        }
+        invalidate()
+    }
+
+    inner class SegmentGestureListener : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean {
+            val position = getTouchPosition(e.x)
+            if (position == selectedPosition) {
+                slideSelected = true
+            }
+            downX = e.x
+            touchOnPosition = position
             invalidate()
+            return true
+        }
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            touchEnd(e.x)
+            return false
+        }
+        override fun onScroll(
+            e1: MotionEvent?,
+            e2: MotionEvent?,
+            distanceX: Float,
+            distanceY: Float,
+        ): Boolean {
+            if (slideSelected) {
+                val destItemX = selectedItemX - (downX - e2!!.x)
+                selectedItemX = if (destItemX > itemFixedPadding) {
+                    max(destItemX, itemEndX.last())
+                } else {
+                    itemFixedPadding
+                }
+            }
+            touchOnPosition = getTouchPosition(e2!!.x)
+            invalidate()
+            return false
         }
     }
+
+
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
@@ -279,12 +281,6 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
 
         setMeasuredDimension(destWidth, destHeight)
     }
-    private val currentSelectedPosition: Int
-        get() = if (!slideSelected) {
-            selectedPosition
-        } else {
-            if (touchOnPosition != -1) touchOnPosition else selectedPosition
-        }
 
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
@@ -295,15 +291,13 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
                             roundRadius,  roundRadius, fillPaint)
 
         var startX = 0f
-        val selectionPosition = currentSelectedPosition
         for ((i, text) in items.withIndex()) {
             startX += itemFixedPadding
             val x = startX + itemWidths[i] / 2
             val y = measuredHeight / 2f - (textPaint.descent() + textPaint.ascent()) / 2
 
             if (i != 0) {
-                val distance = if (i > selectionPosition) abs(i - selectionPosition) else abs(i-1-selectionPosition)
-                linePaint.color = if (distance > 1) separatorColor else Color.TRANSPARENT
+                linePaint.color = if (abs(i - selectedPosition) > 1) separatorColor else Color.TRANSPARENT
                 val startY = (measuredHeight - separatorHeight) / 2
                 canvas.drawRect(
                     startX,
@@ -324,15 +318,15 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
         }
 
         if (selectedPosition >= 0) {
+            val i = selectedPosition
 
-            selectedWidth = if (selectedWidth == 0f) itemWidths[selectionPosition] else selectedWidth
-            selectedItemX = max(itemFixedPadding, selectedItemX)
-            val animateEnd = selectedWidth == itemWidths[selectionPosition]
-            val text = if (previousText == null || animateEnd) items[selectionPosition] else previousText!!
+            selectedWidth = if (selectedWidth == 0f) itemWidths[i] else selectedWidth
+            selectedItemX = if (selectedItemX == 0f) itemFixedPadding else selectedItemX
+            val animateEnd = selectedWidth == itemWidths[i]
+            val text = if (previousText == null || animateEnd) items[i] else previousText!!
             val width = selectedWidth
             val selectedStartX = selectedItemX
 
-            println("itemX ${selectedItemX}, width: $selectedWidth")
             canvas.drawRoundRect(
                 selectedStartX , itemFixedPadding,
                 selectedStartX + width, measuredHeight - itemFixedPadding,
@@ -345,5 +339,9 @@ class SegmentControl(context: Context, attrs: AttributeSet?) : View(context, att
             canvas.drawText(text, x, y, selectedTextPaint)
         }
         canvas.restore()
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+
     }
 }
